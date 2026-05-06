@@ -4,7 +4,7 @@ Run: streamlit run app.py
 """
 import os
 import streamlit as st
-from groq import Groq
+from groq import Groq, RateLimitError
 from dotenv import load_dotenv
 
 from src.apify_ingest import load_or_scrape
@@ -854,11 +854,25 @@ if run_btn:
         st.warning("⚠️ No relevant chunks found. Try a different question or reload sources.")
         st.stop()
 
-    with st.spinner("🧠 Generating reasoning trace…"):
-        trace = generate_trace(client, question, chunks)
+    try:
+        with st.spinner("🧠 Generating reasoning trace…"):
+            trace = generate_trace(client, question, chunks)
+    except RateLimitError:
+        st.error("⚠️ Rate limit reached. Please wait a few seconds and try again.")
+        st.stop()
+    except Exception:
+        st.error("⚠️ Failed to generate the reasoning trace. Check your API usage or logs.")
+        st.stop()
 
-    with st.spinner("✅ Auditing each reasoning step…"):
-        trace, score = audit_trace(client, trace, chunks)
+    try:
+        with st.spinner("✅ Auditing each reasoning step…"):
+            trace, score = audit_trace(client, trace, chunks)
+    except RateLimitError:
+        st.error("⚠️ Rate limit reached during audit. Please wait a few seconds and retry.")
+        st.stop()
+    except Exception:
+        st.error("⚠️ Failed to audit the reasoning trace. Check your API usage or logs.")
+        st.stop()
 
     # ── layout ───────────────────────────────────────────────────────────────
     col_left, col_right = st.columns([3, 2], gap="large")

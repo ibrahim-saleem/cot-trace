@@ -7,8 +7,9 @@ Two-pass Groq pipeline:
 import json
 import re
 import os
+import time
 from pathlib import Path
-from groq import Groq
+from groq import Groq, RateLimitError
 from src.schemas import (
     Citation, ReasoningStep, ReasoningTrace, AuditScore
 )
@@ -37,6 +38,18 @@ def _safe_parse_json(raw: str) -> dict:
     cleaned = re.sub(r"^```(?:json)?\s*", "", raw.strip(), flags=re.MULTILINE)
     cleaned = re.sub(r"\s*```$", "", cleaned.strip(), flags=re.MULTILINE)
     return json.loads(cleaned)
+
+
+def _retry_request(func, max_retries: int = 3, initial_delay: float = 2.0):
+    delay = initial_delay
+    for attempt in range(max_retries):
+        try:
+            return func()
+        except RateLimitError:
+            if attempt == max_retries - 1:
+                raise
+            time.sleep(delay)
+            delay *= 2
 
 
 def _build_trace(data: dict) -> ReasoningTrace:
@@ -74,11 +87,11 @@ def generate_trace(client: Groq, question: str, chunks: list[Chunk]) -> Reasonin
     passages = _format_passages(chunks)
     prompt = REASONING_PROMPT.replace("{passages}", passages).replace("{question}", question)
 
-    msg = client.chat.completions.create(
+    msg = _retry_request(lambda: client.chat.completions.create(
         model=MODEL,
         max_tokens=2000,
         messages=[{"role": "user", "content": prompt}],
-    )
+    ))
     raw = msg.choices[0].message.content
     data = _safe_parse_json(raw)
     return _build_trace(data)
@@ -100,11 +113,11 @@ def audit_trace(client: Groq, trace: ReasoningTrace, chunks: list[Chunk]) -> tup
     }, indent=2)
 
     prompt = AUDIT_PROMPT.replace("{passages}", passages).replace("{trace}", trace_json)
-    msg = client.chat.completions.create(
+    msg = _retry_request(lambda: client.chat.completions.create(
         model=MODEL,
         max_tokens=1500,
         messages=[{"role": "user", "content": prompt}],
-    )
+    ))
     raw = msg.choices[0].message.content
     data = _safe_parse_json(raw)
 
