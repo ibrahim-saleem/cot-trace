@@ -970,7 +970,8 @@ if run_btn:
                             {c.title}
                         </a>
                         <br><span style="font-size: 0.8rem; color: #666;">"{c.snippet[:120]}…"</span>
-                        </div>"""
+                        </div>""",
+                        unsafe_allow_html=True
                     )
                 st.markdown('</div>', unsafe_allow_html=True)
 
