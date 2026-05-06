@@ -163,6 +163,100 @@ def inject_css():
         100% { background-position: 0% 50%; }
     }
     
+    /* ─── Advanced Blob Animations ─── */
+    @keyframes blob1 {
+        0%, 100% {
+            transform: translate(0, 0) scale(1);
+            opacity: 0.7;
+        }
+        25% {
+            transform: translate(50px, -80px) scale(1.1);
+            opacity: 0.6;
+        }
+        50% {
+            transform: translate(-30px, 100px) scale(0.9);
+            opacity: 0.8;
+        }
+        75% {
+            transform: translate(-80px, -50px) scale(1.05);
+            opacity: 0.65;
+        }
+    }
+    
+    @keyframes blob2 {
+        0%, 100% {
+            transform: translate(0, 0) scale(1);
+            opacity: 0.6;
+        }
+        33% {
+            transform: translate(-60px, 80px) scale(1.15);
+            opacity: 0.7;
+        }
+        66% {
+            transform: translate(100px, -60px) scale(0.95);
+            opacity: 0.55;
+        }
+    }
+    
+    @keyframes blob3 {
+        0%, 100% {
+            transform: translate(0, 0) scale(1);
+            opacity: 0.5;
+        }
+        25% {
+            transform: translate(80px, 60px) scale(1.08);
+            opacity: 0.65;
+        }
+        50% {
+            transform: translate(-70px, -90px) scale(0.92);
+            opacity: 0.6;
+        }
+        75% {
+            transform: translate(40px, 70px) scale(1.02);
+            opacity: 0.7;
+        }
+    }
+    
+    @keyframes float-particle {
+        0% {
+            transform: translateY(0) translateX(0) rotate(0deg);
+            opacity: 0;
+        }
+        10% {
+            opacity: 1;
+        }
+        90% {
+            opacity: 1;
+        }
+        100% {
+            transform: translateY(-100vh) translateX(50px) rotate(360deg);
+            opacity: 0;
+        }
+    }
+    
+    @keyframes sway {
+        0%, 100% { transform: translateX(0); }
+        50% { transform: translateX(20px); }
+    }
+    
+    @keyframes wave-motion {
+        0%, 100% { transform: translateY(0) translateX(0); }
+        25% { transform: translateY(-15px) translateX(10px); }
+        50% { transform: translateY(0) translateX(20px); }
+        75% { transform: translateY(15px) translateX(10px); }
+    }
+    
+    @keyframes luminous-pulse {
+        0%, 100% {
+            box-shadow: 0 0 20px rgba(102, 126, 234, 0.3),
+                        inset 0 0 20px rgba(102, 126, 234, 0.1);
+        }
+        50% {
+            box-shadow: 0 0 40px rgba(118, 75, 162, 0.5),
+                        inset 0 0 30px rgba(118, 75, 162, 0.2);
+        }
+    }
+    
     /* ─── Main Container Styling ─── */
     .main {
         animation: fadeIn 0.8s ease-in-out;
@@ -170,13 +264,15 @@ def inject_css():
     
     /* ─── Header & Title Styling ─── */
     h1 {
-        animation: fadeInUp 0.6s ease-out;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        animation: fadeInUp 0.6s ease-out, luminous-pulse 4s ease-in-out 0.6s infinite;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #667eea 100%);
+        background-size: 200% 100%;
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         background-clip: text;
         font-weight: 800;
         letter-spacing: -1px;
+        text-shadow: 0 0 30px rgba(102, 126, 234, 0.3);
     }
     
     h2 {
@@ -184,11 +280,18 @@ def inject_css():
         border-left: 4px solid #667eea;
         padding-left: 12px;
         transition: all 0.3s ease;
+        color: #fff;
     }
     
     h2:hover {
         border-left-color: #764ba2;
         padding-left: 16px;
+        color: #a0b8ff;
+    }
+    
+    h3 {
+        color: #fff;
+        text-shadow: 0 0 20px rgba(102, 126, 234, 0.2);
     }
     
     /* ─── Input Field Styling ─── */
@@ -196,14 +299,28 @@ def inject_css():
         animation: fadeIn 0.6s ease-out 0.1s both;
         border: 2px solid transparent !important;
         border-radius: 12px !important;
-        background: linear-gradient(white, white) padding-box, linear-gradient(135deg, #667eea, #764ba2) border-box;
+        background: linear-gradient(rgba(255,255,255,0.95), rgba(255,255,255,0.95)) padding-box, linear-gradient(135deg, #667eea, #764ba2) border-box !important;
         transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
-        box-shadow: 0 4px 15px rgba(102, 126, 234, 0.1);
+        box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+        color: #111 !important;
     }
     
     .stTextInput input:focus {
-        box-shadow: 0 8px 25px rgba(102, 126, 234, 0.25) !important;
+        box-shadow: 0 8px 35px rgba(102, 126, 234, 0.5) !important;
         transform: translateY(-2px);
+    }
+    
+    .stTextInput input::placeholder {
+        color: #999 !important;
+    }
+    
+    /* ─── General Text Styling ─── */
+    p, span, li, div {
+        color: #e0e0e0;
+    }
+    
+    .stMarkdown, .stMarkdown p {
+        color: #e0e0e0 !important;
     }
     
     /* ─── Button Styling ─── */
@@ -254,29 +371,48 @@ def inject_css():
     
     /* ─── Sidebar Styling ─── */
     [data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #f5f7ff 0%, #f0f3ff 100%);
+        background: linear-gradient(180deg, #1a1a3e 0%, #2d1b4e 50%, #1a1a3e 100%);
         animation: slideInLeft 0.5s ease-out;
+        backdrop-filter: blur(10px);
     }
     
     [data-testid="stSidebar"] h1 {
         animation: bounceIn 0.7s ease-out;
+        color: #fff;
+    }
+    
+    [data-testid="stSidebar"] p, [data-testid="stSidebar"] span {
+        color: #b0b0d0;
+    }
+    
+    [data-testid="stSidebar"] .stCaption {
+        color: #9090b0;
     }
     
     /* ─── Metric Cards ─── */
     [data-testid="metric-container"] {
-        animation: fadeInUp 0.6s ease-out both;
-        background: linear-gradient(135deg, #f5f7ff 0%, #fff 100%);
-        border: 2px solid rgba(102, 126, 234, 0.1);
+        animation: fadeInUp 0.6s ease-out both, luminous-pulse 4s ease-in-out 0.8s infinite;
+        background: linear-gradient(135deg, rgba(102, 126, 234, 0.15) 0%, rgba(118, 75, 162, 0.1) 100%);
+        border: 2px solid rgba(102, 126, 234, 0.3);
         border-radius: 12px;
         padding: 16px;
         transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+        box-shadow: 0 4px 20px rgba(102, 126, 234, 0.2);
+        backdrop-filter: blur(10px);
     }
     
     [data-testid="metric-container"]:hover {
-        border-color: rgba(102, 126, 234, 0.3);
-        box-shadow: 0 8px 24px rgba(102, 126, 234, 0.15);
-        transform: translateY(-4px);
+        border-color: rgba(102, 126, 234, 0.6);
+        box-shadow: 0 8px 35px rgba(102, 126, 234, 0.4);
+        transform: translateY(-4px) scale(1.02);
+    }
+    
+    [data-testid="metric-container"] p {
+        color: #e0e0e0;
+    }
+    
+    [data-testid="metric-container"] div {
+        color: #fff;
     }
     
     /* ─── Container Styling ─── */
@@ -287,14 +423,20 @@ def inject_css():
     /* ─── Expander Styling ─── */
     [data-testid="stExpander"] {
         animation: fadeIn 0.5s ease-out;
-        border: 2px solid rgba(102, 126, 234, 0.1) !important;
+        border: 2px solid rgba(102, 126, 234, 0.2) !important;
         border-radius: 12px !important;
         transition: all 0.3s ease;
+        background: rgba(20, 20, 50, 0.4) !important;
+        backdrop-filter: blur(10px);
     }
     
     [data-testid="stExpander"]:hover {
-        border-color: rgba(102, 126, 234, 0.3) !important;
-        box-shadow: 0 4px 15px rgba(102, 126, 234, 0.1);
+        border-color: rgba(102, 126, 234, 0.5) !important;
+        box-shadow: 0 4px 20px rgba(102, 126, 234, 0.2);
+    }
+    
+    [data-testid="stExpander"] p, [data-testid="stExpander"] span {
+        color: #e0e0e0;
     }
     
     /* ─── Caption & Markdown ─── */
@@ -307,11 +449,13 @@ def inject_css():
         animation: slideInRight 0.5s ease-out !important;
         border-radius: 10px !important;
         transition: all 0.3s ease;
+        background: rgba(50, 30, 50, 0.6) !important;
+        backdrop-filter: blur(10px);
     }
     
     [data-testid="stWarning"]:hover, [data-testid="stError"]:hover, [data-testid="stSuccess"]:hover {
         transform: translateX(4px);
-        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1);
+        box-shadow: 0 8px 25px rgba(102, 126, 234, 0.2);
     }
     
     /* ─── Step Card Animation ─── */
@@ -324,9 +468,10 @@ def inject_css():
         background-size: 200% 200%;
         background-position: 0% 50%;
         transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
         position: relative;
         overflow: hidden;
+        backdrop-filter: blur(10px);
     }
     
     .step-card:before {
@@ -336,33 +481,37 @@ def inject_css():
         left: -50%;
         width: 200%;
         height: 200%;
-        background: linear-gradient(45deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+        background: linear-gradient(45deg, transparent, rgba(255, 255, 255, 0.1), transparent);
         animation: shimmer 3s infinite;
     }
     
     .step-card:hover {
         transform: translateX(6px) translateY(-4px);
-        box-shadow: 0 12px 28px rgba(102, 126, 234, 0.2);
+        box-shadow: 0 16px 40px rgba(102, 126, 234, 0.4);
     }
     
     .step-card.supported {
         border-color: #10b981;
-        background: linear-gradient(135deg, rgba(16, 185, 129, 0.05) 0%, rgba(16, 185, 129, 0.02) 100%);
+        background: linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(16, 185, 129, 0.08) 100%);
     }
     
     .step-card.weak {
         border-color: #f59e0b;
-        background: linear-gradient(135deg, rgba(245, 158, 11, 0.05) 0%, rgba(245, 158, 11, 0.02) 100%);
+        background: linear-gradient(135deg, rgba(245, 158, 11, 0.15) 0%, rgba(245, 158, 11, 0.08) 100%);
     }
     
     .step-card.unsupported, .step-card.contradictory {
         border-color: #ef4444;
-        background: linear-gradient(135deg, rgba(239, 68, 68, 0.05) 0%, rgba(239, 68, 68, 0.02) 100%);
+        background: linear-gradient(135deg, rgba(239, 68, 68, 0.15) 0%, rgba(239, 68, 68, 0.08) 100%);
     }
     
     .step-card.speculative {
         border-color: #f97316;
-        background: linear-gradient(135deg, rgba(249, 115, 22, 0.05) 0%, rgba(249, 115, 22, 0.02) 100%);
+        background: linear-gradient(135deg, rgba(249, 115, 22, 0.15) 0%, rgba(249, 115, 22, 0.08) 100%);
+    }
+    
+    .step-card p, .step-card span {
+        color: #e0e0e0;
     }
     
     /* ─── Links & Citations ─── */
@@ -458,13 +607,19 @@ def inject_css():
         border: 2px solid transparent;
         border-radius: 12px;
         padding: 20px;
-        background: linear-gradient(white, white) padding-box;
+        background: linear-gradient(rgba(20, 20, 50, 0.6), rgba(20, 20, 50, 0.6)) padding-box, linear-gradient(135deg, #667eea, #764ba2) border-box;
         animation: gradientBorder 3s ease infinite;
         transition: all 0.3s ease;
+        backdrop-filter: blur(10px);
     }
     
     .glow-card:hover {
         transform: translateY(-8px) scale(1.01);
+        box-shadow: 0 12px 40px rgba(102, 126, 234, 0.3);
+    }
+    
+    .glow-card p {
+        color: #e0e0e0;
     }
     
     /* ─── Wave Animation ─── */
@@ -506,15 +661,109 @@ def inject_css():
     }
     
     /* ─── Page Background Animation ─── */
-    body {
-        background: linear-gradient(-45deg, #f5f7ff, #fff, #f0f3ff, #fff);
+    body, .stApp {
+        background: linear-gradient(135deg, #0a0e27 0%, #1a1a3e 25%, #2d1b4e 50%, #1a1a3e 75%, #0a0e27 100%);
         background-size: 400% 400%;
-        animation: gradientShift 15s ease infinite;
+        animation: gradientShift 20s ease infinite;
+        position: relative;
+        overflow: hidden;
+    }
+    
+    /* ─── Background Overlay Layers ─── */
+    body::before {
+        content: '';
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: 
+            radial-gradient(circle at 20% 50%, rgba(102, 126, 234, 0.15) 0%, transparent 50%),
+            radial-gradient(circle at 80% 80%, rgba(118, 75, 162, 0.15) 0%, transparent 50%),
+            radial-gradient(circle at 40% 0%, rgba(100, 200, 255, 0.1) 0%, transparent 60%);
+        animation: sway 20s ease-in-out infinite;
+        z-index: 0;
+        pointer-events: none;
+    }
+    
+    /* ─── Floating Blobs Background ─── */
+    body::after {
+        content: '';
+        position: fixed;
+        top: -50%;
+        left: -50%;
+        width: 200%;
+        height: 200%;
+        background: 
+            radial-gradient(ellipse 400px 600px at 20% 30%, rgba(102, 126, 234, 0.08) 0%, transparent 40%),
+            radial-gradient(ellipse 600px 400px at 80% 60%, rgba(118, 75, 162, 0.08) 0%, transparent 40%),
+            radial-gradient(ellipse 500px 500px at 50% 80%, rgba(100, 200, 255, 0.06) 0%, transparent 50%);
+        animation: wave-motion 25s ease-in-out infinite;
+        z-index: 1;
+        pointer-events: none;
+    }
+    
+    /* ─── Blob Elements ─── */
+    .stApp::before {
+        content: '';
+        position: fixed;
+        bottom: -200px;
+        left: -200px;
+        width: 500px;
+        height: 500px;
+        background: radial-gradient(circle, rgba(102, 126, 234, 0.1) 0%, transparent 70%);
+        border-radius: 40% 60% 70% 30% / 40% 50% 60% 50%;
+        animation: blob1 25s infinite ease-in-out;
+        z-index: 0;
+        pointer-events: none;
+        mix-blend-mode: screen;
+    }
+    
+    .stApp::after {
+        content: '';
+        position: fixed;
+        top: -150px;
+        right: -100px;
+        width: 600px;
+        height: 600px;
+        background: radial-gradient(circle, rgba(118, 75, 162, 0.08) 0%, transparent 70%);
+        border-radius: 30% 70% 70% 30% / 30% 30% 70% 70%;
+        animation: blob2 30s infinite ease-in-out;
+        z-index: 0;
+        pointer-events: none;
+        mix-blend-mode: screen;
+    }
+    
+    /* ─── Third Blob ─── */
+    [data-testid="stAppViewContainer"]::before {
+        content: '';
+        position: fixed;
+        bottom: 200px;
+        right: -300px;
+        width: 700px;
+        height: 700px;
+        background: radial-gradient(circle, rgba(100, 200, 255, 0.08) 0%, transparent 70%);
+        border-radius: 60% 40% 30% 70% / 60% 30% 70% 40%;
+        animation: blob3 35s infinite ease-in-out;
+        z-index: 0;
+        pointer-events: none;
+        mix-blend-mode: screen;
+    }
+    
+    /* ─── Main Content Container ─── */
+    [data-testid="stAppViewContainer"] {
+        position: relative;
+        z-index: 10;
     }
     
     /* ─── Smooth Scroll ─── */
     html {
         scroll-behavior: smooth;
+    }
+    
+    /* ─── Backdrop Effects ─── */
+    [data-testid="stMainBlockContainer"] {
+        backdrop-filter: blur(0.5px);
     }
     </style>
     """, unsafe_allow_html=True)
