@@ -4,7 +4,7 @@ Run: streamlit run app.py
 """
 import os
 import streamlit as st
-from groq import Groq, RateLimitError
+from anthropic import Anthropic, RateLimitError
 from dotenv import load_dotenv
 
 from src.apify_ingest import load_or_scrape
@@ -844,7 +844,7 @@ if run_btn:
         st.error("🚨 Anthropic API key required.")
         st.stop()
 
-    client = Groq(api_key=anthropic_key)
+    client = Anthropic(api_key=anthropic_key)
     retriever: Retriever = st.session_state["retriever"]
 
     with st.spinner("🔎 Retrieving relevant evidence…"):

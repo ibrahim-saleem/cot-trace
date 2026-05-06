@@ -1,6 +1,6 @@
 """
 reason.py
-Two-pass Groq pipeline:
+Two-pass Anthropic pipeline:
   Pass 1: generate structured reasoning trace from retrieved chunks
   Pass 2: audit each reasoning step against the same chunks
 """
@@ -9,13 +9,15 @@ import re
 import os
 import time
 from pathlib import Path
-from groq import Groq, RateLimitError
+from anthropic import Anthropic, RateLimitError
 from src.schemas import (
     Citation, ReasoningStep, ReasoningTrace, AuditScore
 )
 from src.retrieve import Chunk
 
-MODEL = "llama-3.3-70b-versatile"
+MODEL = os.getenv("ANTHROPIC_MODEL", "claude-instant-v1")
+TRACE_MAX_TOKENS = int(os.getenv("ANTHROPIC_TRACE_MAX_TOKENS", "1000"))
+AUDIT_MAX_TOKENS = int(os.getenv("ANTHROPIC_AUDIT_MAX_TOKENS", "700"))
 
 REASONING_PROMPT = (Path(__file__).parent.parent / "prompts" / "reasoning_prompt.md").read_text()
 AUDIT_PROMPT     = (Path(__file__).parent.parent / "prompts" / "audit_prompt.md").read_text()
@@ -80,24 +82,25 @@ def _build_trace(data: dict) -> ReasoningTrace:
 
 
 def get_client():
-    return Groq(api_key=os.environ["ANTHROPIC_API_KEY"])
+    return Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
 
-def generate_trace(client: Groq, question: str, chunks: list[Chunk]) -> ReasoningTrace:
+def generate_trace(client: Anthropic, question: str, chunks: list[Chunk]) -> ReasoningTrace:
     passages = _format_passages(chunks)
     prompt = REASONING_PROMPT.replace("{passages}", passages).replace("{question}", question)
 
-    msg = _retry_request(lambda: client.chat.completions.create(
+    msg = _retry_request(lambda: client.completions.create(
         model=MODEL,
-        max_tokens=2000,
-        messages=[{"role": "user", "content": prompt}],
+        prompt=prompt,
+        max_tokens_to_sample=2000,
+        temperature=0.15,
     ))
-    raw = msg.choices[0].message.content
+    raw = msg.completion
     data = _safe_parse_json(raw)
     return _build_trace(data)
 
 
-def audit_trace(client: Groq, trace: ReasoningTrace, chunks: list[Chunk]) -> tuple[ReasoningTrace, AuditScore]:
+def audit_trace(client: Anthropic, trace: ReasoningTrace, chunks: list[Chunk]) -> tuple[ReasoningTrace, AuditScore]:
     passages = _format_passages(chunks)
     trace_json = json.dumps({
         "answer": trace.answer,
@@ -113,12 +116,13 @@ def audit_trace(client: Groq, trace: ReasoningTrace, chunks: list[Chunk]) -> tup
     }, indent=2)
 
     prompt = AUDIT_PROMPT.replace("{passages}", passages).replace("{trace}", trace_json)
-    msg = _retry_request(lambda: client.chat.completions.create(
+    msg = _retry_request(lambda: client.completions.create(
         model=MODEL,
-        max_tokens=1500,
-        messages=[{"role": "user", "content": prompt}],
+        prompt=prompt,
+        max_tokens_to_sample=1500,
+        temperature=0.15,
     ))
-    raw = msg.choices[0].message.content
+    raw = msg.completion
     data = _safe_parse_json(raw)
 
     audit_map = {a["step_id"]: a for a in data.get("step_audits", [])}
