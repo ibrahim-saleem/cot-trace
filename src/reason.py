@@ -2,8 +2,9 @@
 reason.py
 Two-pass local pipeline (no external LLM APIs):
     Pass 1: build a deterministic extractive reasoning trace from retrieved chunks
-    Pass 2: audit each reasoning step with support/relevance/contradiction heuristics
+    Pass 2: audit each reasoning step with corroboration/relevance/contradiction heuristics
 """
+import math
 import re
 from src.schemas import (
     Citation, ReasoningStep, ReasoningTrace, AuditScore
@@ -22,10 +23,15 @@ MIN_SENTENCE_SCORE = 0.06
 STRONG_SENTENCE_SCORE = 0.16
 MIN_TOP_SCORE_FOR_ANSWER = 0.14
 TOP_STEPS = 3
+CORROBORATE_THRESHOLD = 0.32
 
 
 def _tokenize(text: str) -> set[str]:
     return {t for t in re.findall(r"[a-z0-9]+", text.lower()) if t not in STOPWORDS and len(t) > 2}
+
+
+def _token_list(text: str) -> list[str]:
+    return [t for t in re.findall(r"[a-z0-9]+", text.lower()) if t not in STOPWORDS and len(t) > 2]
 
 
 def _bigrams(tokens: set[str]) -> set[str]:
@@ -49,10 +55,34 @@ def _f1_overlap(a: set[str], b: set[str]) -> float:
     return 2 * precision * recall / max(precision + recall, 1e-9)
 
 
-def _question_sentence_score(question: str, sentence: str) -> float:
+def _idf_from_chunks(chunks: list[Chunk]) -> dict[str, float]:
+    n_docs = max(len(chunks), 1)
+    df: dict[str, int] = {}
+    for c in chunks:
+        seen = set(_token_list(c.text))
+        for t in seen:
+            df[t] = df.get(t, 0) + 1
+    return {t: math.log((1 + n_docs) / (1 + freq)) + 1.0 for t, freq in df.items()}
+
+
+def _weighted_f1(a_tokens: set[str], b_tokens: set[str], idf: dict[str, float]) -> float:
+    if not a_tokens or not b_tokens:
+        return 0.0
+    inter = a_tokens & b_tokens
+    if not inter:
+        return 0.0
+    inter_w = sum(idf.get(t, 1.0) for t in inter)
+    a_w = sum(idf.get(t, 1.0) for t in a_tokens)
+    b_w = sum(idf.get(t, 1.0) for t in b_tokens)
+    precision = inter_w / max(b_w, 1e-9)
+    recall = inter_w / max(a_w, 1e-9)
+    return 2 * precision * recall / max(precision + recall, 1e-9)
+
+
+def _question_sentence_score(question: str, sentence: str, idf: dict[str, float]) -> float:
     q_tokens = _tokenize(question)
     s_tokens = _tokenize(sentence)
-    token_f1 = _f1_overlap(q_tokens, s_tokens)
+    token_f1 = _weighted_f1(q_tokens, s_tokens, idf)
     bg_f1 = _f1_overlap(_bigrams(q_tokens), _bigrams(s_tokens))
 
     has_q_num = bool(re.search(r"\d", question))
@@ -72,10 +102,11 @@ def _has_negation(text: str) -> bool:
 
 
 def _build_candidates(question: str, chunks: list[Chunk]) -> list[tuple[float, Chunk, str]]:
+    idf = _idf_from_chunks(chunks)
     candidates: list[tuple[float, Chunk, str]] = []
     for chunk in chunks:
         for sentence in _sentences(chunk.text):
-            score = _question_sentence_score(question, sentence)
+            score = _question_sentence_score(question, sentence, idf)
             if score >= MIN_SENTENCE_SCORE:
                 candidates.append((score, chunk, sentence))
 
@@ -95,9 +126,10 @@ def _select_diverse(candidates: list[tuple[float, Chunk, str]], k: int = TOP_STE
         best_idx = 0
         best_score = -1e9
         for i, cand in enumerate(pool):
-            rel, _, sent = cand
+            rel, chunk, sent = cand
             redundancy = max(_sentence_similarity(sent, s[2]) for s in selected)
-            mmr = lambda_relevance * rel - (1 - lambda_relevance) * redundancy
+            source_bonus = 0.06 if chunk.source not in {s[1].source for s in selected} else 0.0
+            mmr = lambda_relevance * rel - (1 - lambda_relevance) * redundancy + source_bonus
             if mmr > best_score:
                 best_score = mmr
                 best_idx = i
@@ -123,9 +155,19 @@ def _build_extractive_answer(top: list[tuple[float, Chunk, str]]) -> tuple[str, 
         lines.append(f'- "{sentence}" ({src})')
 
     mean_score = sum(score for score, _, _ in chosen) / max(len(chosen), 1)
-    unique_sources = len({chunk.source for _, chunk, _ in chosen})
+    chosen_sources = {chunk.source for _, chunk, _ in chosen}
+    unique_sources = len(chosen_sources)
     diversity = unique_sources / max(len(chosen), 1)
-    confidence = min(0.92, max(0.25, 0.65 * mean_score + 0.35 * diversity))
+
+    corroboration = 0.0
+    if len(chosen) >= 2:
+        pair_sims = []
+        for i in range(len(chosen)):
+            for j in range(i + 1, len(chosen)):
+                pair_sims.append(_sentence_similarity(chosen[i][2], chosen[j][2]))
+        corroboration = sum(pair_sims) / max(len(pair_sims), 1)
+
+    confidence = min(0.92, max(0.2, 0.5 * mean_score + 0.3 * diversity + 0.2 * corroboration))
 
     risk_flags: list[str] = []
     if len(strong) == 0:
@@ -134,6 +176,8 @@ def _build_extractive_answer(top: list[tuple[float, Chunk, str]]) -> tuple[str, 
         risk_flags.append("low_confidence")
     if len(chosen) > 1 and unique_sources == 1:
         risk_flags.append("single_source")
+    if corroboration < 0.12 and len(chosen) > 1:
+        risk_flags.append("low_corroboration")
     if not risk_flags:
         risk_flags = ["none"]
 
@@ -175,34 +219,51 @@ def generate_trace(question: str, chunks: list[Chunk]) -> ReasoningTrace:
 
 
 def audit_trace(trace: ReasoningTrace, chunks: list[Chunk]) -> tuple[ReasoningTrace, AuditScore]:
+    idf = _idf_from_chunks(chunks)
     evidence_sents: list[str] = []
+    evidence_meta: list[tuple[str, str]] = []  # (source, sentence)
     for c in chunks:
-        evidence_sents.extend(_sentences(c.text))
+        sents = _sentences(c.text)
+        evidence_sents.extend(sents)
+        evidence_meta.extend([(c.source, s) for s in sents])
 
     support_strengths: list[float] = []
+    independent_supports: list[float] = []
     question_relevance_scores: list[float] = []
+    corroboration_scores: list[float] = []
 
     for step in trace.steps:
         best_overlap = 0.0
+        best_independent = 0.0
+        source_scores: dict[str, float] = {}
         contradiction_hit = False
+        primary_source_key = step.citations[0].doc_id.split("_")[0].lower() if step.citations else ""
 
-        for s in evidence_sents:
+        for source, s in evidence_meta:
             sim = _sentence_similarity(step.text, s)
             if sim > best_overlap:
                 best_overlap = sim
+            source_scores[source] = max(source_scores.get(source, 0.0), sim)
+            if not source.lower().startswith(primary_source_key):
+                best_independent = max(best_independent, sim)
             if sim >= 0.45 and (_has_negation(step.text) ^ _has_negation(s)):
                 contradiction_hit = True
 
-        question_overlap = _question_sentence_score(trace.question, step.text)
+        corroborating_sources = sum(1 for v in source_scores.values() if v >= CORROBORATE_THRESHOLD)
+        corroboration = min(1.0, corroborating_sources / 2.0)
+
+        question_overlap = _question_sentence_score(trace.question, step.text, idf)
         support_strengths.append(best_overlap)
+        independent_supports.append(best_independent)
         question_relevance_scores.append(question_overlap)
+        corroboration_scores.append(corroboration)
 
         if contradiction_hit:
             step.audit_label = "contradictory"
             step.audit_explanation = "Potential contradiction detected against retrieved evidence with opposite polarity."
-        elif best_overlap >= 0.45 and question_overlap >= STRONG_SENTENCE_SCORE:
+        elif best_overlap >= 0.45 and question_overlap >= STRONG_SENTENCE_SCORE and corroborating_sources >= 2:
             step.audit_label = "supported"
-            step.audit_explanation = "Strong evidence overlap and strong relevance to the question."
+            step.audit_explanation = "Strong evidence overlap, strong relevance, and corroboration from multiple sources."
         elif best_overlap >= 0.3 and question_overlap >= MIN_SENTENCE_SCORE:
             step.audit_label = "weak"
             step.audit_explanation = "Partially supported by evidence, but relevance or strength is limited."
@@ -217,12 +278,22 @@ def audit_trace(trace: ReasoningTrace, chunks: list[Chunk]) -> tuple[ReasoningTr
     n = len(trace.steps)
     grounding = sum(label_weights.get(s.audit_label, 0) for s in trace.steps) / max(n, 1)
     # Coverage reflects evidence strength, not only citation presence.
-    coverage = sum(min(v / 0.45, 1.0) for v in support_strengths) / max(n, 1)
+    direct_coverage = sum(min(v / 0.45, 1.0) for v in support_strengths) / max(n, 1)
+    independent_coverage = sum(min(v / 0.4, 1.0) for v in independent_supports) / max(n, 1)
+    coverage = 0.5 * direct_coverage + 0.5 * independent_coverage
     question_relevance = sum(question_relevance_scores) / max(n, 1)
+    corroboration = sum(corroboration_scores) / max(n, 1)
     contradictions = sum(1 for s in trace.steps if s.audit_label == "contradictory")
     # Calibrate alignment by both evidence quality and generation confidence.
-    answer_alignment = min(grounding, question_relevance, trace.confidence)
-    raw_overall = grounding * 0.4 + coverage * 0.2 + question_relevance * 0.25 + answer_alignment * 0.15
+    answer_alignment = min(grounding, question_relevance, corroboration + 0.2, trace.confidence)
+    raw_overall = (
+        grounding * 0.3
+        + coverage * 0.15
+        + independent_coverage * 0.15
+        + question_relevance * 0.2
+        + corroboration * 0.1
+        + answer_alignment * 0.1
+    )
     contradiction_penalty = min(0.3, contradictions * 0.12)
     overall = round(max(0.0, raw_overall - contradiction_penalty), 3)
 
