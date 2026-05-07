@@ -24,6 +24,14 @@ RAW_DIR.mkdir(parents=True, exist_ok=True)
 CACHE_FILE = RAW_DIR / "documents.json"
 
 
+def load_cached_documents() -> list[Document]:
+    """Load documents from local cache only (no network calls)."""
+    if not CACHE_FILE.exists():
+        raise FileNotFoundError(f"Cache file not found: {CACHE_FILE}")
+    raw = json.loads(CACHE_FILE.read_text())
+    return [Document(**d) for d in raw]
+
+
 def run_crawler(client: ApifyClient, source: dict) -> list[dict]:
     """Run one Apify Website Content Crawler actor call."""
     run = client.actor("apify/website-content-crawler").call(
@@ -64,8 +72,10 @@ def load_or_scrape(token: str, force: bool = False) -> list[Document]:
     Pass force=True to re-scrape even if cache exists.
     """
     if CACHE_FILE.exists() and not force:
-        raw = json.loads(CACHE_FILE.read_text())
-        return [Document(**d) for d in raw]
+        return load_cached_documents()
+
+    if not token:
+        raise ValueError("APIFY_TOKEN is required for scraping when cache is missing or force=True")
 
     client = ApifyClient(token)
     all_docs: list[Document] = []

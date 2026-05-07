@@ -1,138 +1,108 @@
 """
 reason.py
-Two-pass Groq pipeline:
-  Pass 1: generate structured reasoning trace from retrieved chunks
-  Pass 2: audit each reasoning step against the same chunks
+Two-pass local pipeline (no external LLM APIs):
+    Pass 1: build an extractive reasoning trace from retrieved chunks
+    Pass 2: audit each reasoning step against the same chunks
 """
-import json
 import re
-import os
-import time
-from pathlib import Path
-from groq import Groq, RateLimitError
 from src.schemas import (
     Citation, ReasoningStep, ReasoningTrace, AuditScore
 )
 from src.retrieve import Chunk
 
-MODEL = "llama-3.3-70b-versatile"
+STOPWORDS = {
+    "the", "a", "an", "and", "or", "to", "of", "in", "on", "for", "with", "is", "are", "was", "were",
+    "be", "by", "that", "this", "it", "as", "at", "from", "about", "into", "than", "then", "so", "if",
+}
 
-REASONING_PROMPT = (Path(__file__).parent.parent / "prompts" / "reasoning_prompt.md").read_text()
-AUDIT_PROMPT     = (Path(__file__).parent.parent / "prompts" / "audit_prompt.md").read_text()
+
+def _tokenize(text: str) -> set[str]:
+    return {t for t in re.findall(r"[a-z0-9]+", text.lower()) if t not in STOPWORDS and len(t) > 2}
 
 
-def _format_passages(chunks: list[Chunk]) -> str:
-    parts = []
+def _sentences(text: str) -> list[str]:
+    parts = re.split(r"(?<=[.!?])\s+", text.strip())
+    return [p.strip() for p in parts if len(p.strip()) > 30]
+
+
+def _overlap_score(a: str, b: str) -> float:
+    ta = _tokenize(a)
+    tb = _tokenize(b)
+    if not ta or not tb:
+        return 0.0
+    return len(ta & tb) / max(len(ta), 1)
+
+
+def generate_trace(question: str, chunks: list[Chunk]) -> ReasoningTrace:
+    ranked: list[tuple[float, Chunk, str]] = []
+
     for c in chunks:
-        parts.append(
-            f"[doc_id: {c.doc_id}]\n"
-            f"Source: {c.source}\n"
-            f"Title: {c.title}\n"
-            f"URL: {c.url}\n"
-            f"---\n{c.text}\n"
-        )
-    return "\n\n".join(parts)
+        for s in _sentences(c.text):
+            score = _overlap_score(s, question)
+            if score > 0:
+                ranked.append((score, c, s))
 
+    ranked.sort(key=lambda x: x[0], reverse=True)
+    top = ranked[:3] if ranked else []
 
-def _safe_parse_json(raw: str) -> dict:
-    cleaned = re.sub(r"^```(?:json)?\s*", "", raw.strip(), flags=re.MULTILINE)
-    cleaned = re.sub(r"\s*```$", "", cleaned.strip(), flags=re.MULTILINE)
-    return json.loads(cleaned)
-
-
-def _retry_request(func, max_retries: int = 3, initial_delay: float = 2.0):
-    delay = initial_delay
-    for attempt in range(max_retries):
-        try:
-            return func()
-        except RateLimitError:
-            if attempt == max_retries - 1:
-                raise
-            time.sleep(delay)
-            delay *= 2
-
-
-def _build_trace(data: dict) -> ReasoningTrace:
-    steps = []
-    for s in data.get("steps", []):
-        citations = [
-            Citation(
-                doc_id=c.get("doc_id", ""),
-                title=c.get("title", ""),
-                url=c.get("url", ""),
-                snippet=c.get("snippet", ""),
-            )
-            for c in s.get("citations", [])
-        ]
+    steps: list[ReasoningStep] = []
+    for idx, (score, chunk, sentence) in enumerate(top, start=1):
+        label = "observation" if idx == 1 else "inference"
         steps.append(ReasoningStep(
-            step_id=s["step_id"],
-            text=s["text"],
-            label=s.get("label", "inference"),
-            citations=citations,
+            step_id=idx,
+            text=sentence,
+            label=label,
+            citations=[Citation(
+                doc_id=chunk.doc_id,
+                title=chunk.title,
+                url=chunk.url,
+                snippet=sentence[:220],
+            )],
         ))
+
+    if steps:
+        answer = " ".join(s.text for s in steps[:2])
+        confidence = min(0.9, max(0.45, sum(score for score, _, _ in top) / max(len(top), 1)))
+    else:
+        answer = "I could not find enough relevant evidence in the loaded sources."
+        confidence = 0.25
+
+    risk_flags = ["low_evidence"] if len(steps) < 2 else ["none"]
+
     return ReasoningTrace(
-        question=data["question"],
-        answer=data["answer"],
-        confidence=float(data.get("confidence", 0.5)),
-        risk_flags=data.get("risk_flags", []),
+        question=question,
+        answer=answer,
+        confidence=confidence,
+        risk_flags=risk_flags,
         steps=steps,
     )
 
 
-def get_client():
-    return Groq(api_key=os.environ["ANTHROPIC_API_KEY"])
-
-
-def generate_trace(client: Groq, question: str, chunks: list[Chunk]) -> ReasoningTrace:
-    passages = _format_passages(chunks)
-    prompt = REASONING_PROMPT.replace("{passages}", passages).replace("{question}", question)
-
-    msg = _retry_request(lambda: client.chat.completions.create(
-        model=MODEL,
-        max_tokens=2000,
-        messages=[{"role": "user", "content": prompt}],
-    ))
-    raw = msg.choices[0].message.content
-    data = _safe_parse_json(raw)
-    return _build_trace(data)
-
-
-def audit_trace(client: Groq, trace: ReasoningTrace, chunks: list[Chunk]) -> tuple[ReasoningTrace, AuditScore]:
-    passages = _format_passages(chunks)
-    trace_json = json.dumps({
-        "answer": trace.answer,
-        "steps": [
-            {
-                "step_id": s.step_id,
-                "text": s.text,
-                "label": s.label,
-                "citations": [c.__dict__ for c in s.citations],
-            }
-            for s in trace.steps
-        ],
-    }, indent=2)
-
-    prompt = AUDIT_PROMPT.replace("{passages}", passages).replace("{trace}", trace_json)
-    msg = _retry_request(lambda: client.chat.completions.create(
-        model=MODEL,
-        max_tokens=1500,
-        messages=[{"role": "user", "content": prompt}],
-    ))
-    raw = msg.choices[0].message.content
-    data = _safe_parse_json(raw)
-
-    audit_map = {a["step_id"]: a for a in data.get("step_audits", [])}
+def audit_trace(trace: ReasoningTrace, chunks: list[Chunk]) -> tuple[ReasoningTrace, AuditScore]:
     for step in trace.steps:
-        audit = audit_map.get(step.step_id, {})
-        step.audit_label = audit.get("audit_label", "unsupported")
-        step.audit_explanation = audit.get("audit_explanation", "")
+        best_overlap = 0.0
+        for c in chunks:
+            best_overlap = max(best_overlap, _overlap_score(step.text, c.text))
+
+        if best_overlap >= 0.35:
+            step.audit_label = "supported"
+            step.audit_explanation = "High lexical overlap with retrieved evidence."
+        elif best_overlap >= 0.2:
+            step.audit_label = "weak"
+            step.audit_explanation = "Partial overlap with evidence; claim may be over-generalized."
+        elif step.citations:
+            step.audit_label = "speculative"
+            step.audit_explanation = "Citation exists, but content overlap is weak."
+        else:
+            step.audit_label = "unsupported"
+            step.audit_explanation = "No clear supporting evidence found in retrieved chunks."
 
     label_weights = {"supported": 1.0, "weak": 0.5, "unsupported": 0.0, "contradictory": 0.0, "speculative": 0.2}
     n = len(trace.steps)
     grounding = sum(label_weights.get(s.audit_label, 0) for s in trace.steps) / max(n, 1)
-    coverage  = sum(1 for s in trace.steps if s.citations) / max(n, 1)
+    coverage = sum(1 for s in trace.steps if s.citations) / max(n, 1)
     contradictions = sum(1 for s in trace.steps if s.audit_label == "contradictory")
-    answer_alignment = float(data.get("answer_alignment", 0.5))
+    answer_alignment = min(1.0, grounding * 0.8 + coverage * 0.2)
     overall = round((grounding * 0.4 + coverage * 0.3 + answer_alignment * 0.3), 3)
 
     score = AuditScore(
@@ -143,3 +113,47 @@ def audit_trace(client: Groq, trace: ReasoningTrace, chunks: list[Chunk]) -> tup
         overall=overall,
     )
     return trace, score
+
+
+def run_pipeline_safe(question: str, chunks: list[Chunk]) -> tuple[ReasoningTrace, AuditScore]:
+    """Always return a result, even if the main local pipeline fails."""
+    try:
+        trace = generate_trace(question, chunks)
+        return audit_trace(trace, chunks)
+    except Exception:
+        fallback_text = "I could not run full reasoning, so this is a best-effort evidence summary."
+        citation = None
+        if chunks:
+            c = chunks[0]
+            snippet = (c.text or "")[:220]
+            fallback_text = snippet or fallback_text
+            citation = Citation(
+                doc_id=c.doc_id,
+                title=c.title,
+                url=c.url,
+                snippet=snippet,
+            )
+
+        step = ReasoningStep(
+            step_id=1,
+            text=fallback_text,
+            label="observation",
+            citations=[citation] if citation else [],
+            audit_label="weak",
+            audit_explanation="Fallback mode: returned best available local evidence.",
+        )
+        trace = ReasoningTrace(
+            question=question,
+            answer=fallback_text,
+            confidence=0.4,
+            risk_flags=["fallback_mode"],
+            steps=[step],
+        )
+        score = AuditScore(
+            grounding_score=0.5,
+            evidence_coverage=1.0 if citation else 0.0,
+            contradiction_count=0,
+            answer_alignment=0.5,
+            overall=0.5,
+        )
+        return trace, score

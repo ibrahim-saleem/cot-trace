@@ -1,6 +1,6 @@
 # COT-Trace
 
-**Live web reasoning auditor** — scrapes AI research blogs with Apify, asks Claude a question, then audits whether every reasoning step is actually supported by the evidence.
+**Live web reasoning auditor** — scrapes AI research blogs with Apify, answers questions using local extractive reasoning, then audits whether each reasoning step is supported by evidence.
 
 ---
 
@@ -13,6 +13,9 @@ python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env   # fill in your tokens
 ```
+
+Only `APIFY_TOKEN` is needed.
+No Groq/Anthropic/OpenAI keys are required.
 
 ---
 
@@ -33,6 +36,18 @@ Subsequent runs skip the network and load from cache — **demo is instant**.
 streamlit run app.py
 ```
 
+## Deploy on Streamlit Community Cloud (no local run)
+
+1. Push this repository to GitHub.
+2. Go to Streamlit Community Cloud and click **New app**.
+3. Select this repo, branch `main`, and entrypoint file `app.py`.
+4. Click **Deploy**.
+
+Notes:
+- This app runs in local-free mode (no Anthropic/Groq keys).
+- It reads cached data from `data/raw/documents.json`.
+- If you want cloud-side re-scraping later, add `APIFY_TOKEN` in Streamlit app secrets.
+
 ---
 
 ## Demo flow (2 min)
@@ -52,9 +67,9 @@ Apify scrape (pre-cached)
    ↓
 TF-IDF retriever  (scikit-learn, no infra needed)
    ↓
-Claude Pass 1     (structured reasoning JSON)
+Local Pass 1      (extractive reasoning trace)
    ↓
-Claude Pass 2     (step-level audit labels)
+Local Pass 2      (step-level overlap audit labels)
    ↓
 Streamlit UI      (scores + clickable citations)
 ```

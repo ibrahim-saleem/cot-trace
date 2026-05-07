@@ -4,12 +4,11 @@ Run: streamlit run app.py
 """
 import os
 import streamlit as st
-from groq import Groq, RateLimitError
 from dotenv import load_dotenv
 
-from src.apify_ingest import load_or_scrape
+from src.apify_ingest import load_cached_documents
 from src.retrieve import Retriever
-from src.reason import generate_trace, audit_trace
+from src.reason import run_pipeline_safe
 from src.schemas import AuditLabel
 
 load_dotenv()
@@ -778,29 +777,31 @@ LABEL_COLORS = {
     "speculative":   ("🟠", "#fde8d8", "#7d3c10", "speculative"),
 }
 
+
+def _ensure_retriever_loaded() -> None:
+    if "retriever" in st.session_state:
+        return
+    docs = load_cached_documents()
+    st.session_state["docs"] = docs
+    st.session_state["retriever"] = Retriever(docs)
+
 # ── sidebar: config ──────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("### <span class='title-icon'>⚙️</span>COT-Trace", unsafe_allow_html=True, help="Live web reasoning auditor")
     st.caption("🔍 Live web reasoning auditor")
-    st.divider()
-
-    # Load tokens from environment variables (hidden from UI)
-    apify_token = os.getenv("APIFY_TOKEN", "")
-    anthropic_key = os.getenv("ANTHROPIC_API_KEY", "")
+    st.caption("Mode: Local free (question-only)")
+    st.caption("Uses cached data in data/raw/documents.json")
 
     st.divider()
-    force_rescrape = st.checkbox("⚡ Force re-scrape (slow)", value=False)
+    if st.button("Reload cached sources", use_container_width=True, key="load_btn"):
+        with st.spinner("Loading cached documents…"):
+            st.session_state.pop("retriever", None)
+            st.session_state.pop("docs", None)
+            _ensure_retriever_loaded()
+        st.success(f"Loaded {len(st.session_state['docs'])} documents from cache")
 
-    if st.button("🔄 Load / refresh sources", use_container_width=True, key="load_btn"):
-        if not apify_token:
-            st.error("🚨 Apify token required")
-        else:
-            with st.spinner("📥 Loading documents…"):
-                st.session_state["docs"] = load_or_scrape(apify_token, force=force_rescrape)
-                st.session_state["retriever"] = Retriever(st.session_state["docs"])
-            st.success(f"✅ Loaded {len(st.session_state['docs'])} documents")
-
-    if "docs" in st.session_state:
+    try:
+        _ensure_retriever_loaded()
         st.divider()
         st.markdown("**📚 Sources**")
         docs = st.session_state["docs"]
@@ -809,6 +810,8 @@ with st.sidebar:
             sources[d.source] = sources.get(d.source, 0) + 1
         for src, count in sources.items():
             st.caption(f"• {src}: {count} pages")
+    except Exception:
+        st.error("Could not load cached sources. Run: python -m src.apify_ingest")
 
 # ── main ─────────────────────────────────────────────────────────────────────
 st.markdown("""
@@ -837,42 +840,18 @@ with col2:
     run_btn = st.button("Audit 🚀", type="primary", disabled=not question, use_container_width=True, help="Start the audit")
 
 if run_btn:
-    if "retriever" not in st.session_state:
-        st.error("🚨 Load sources first (sidebar).")
+    try:
+        _ensure_retriever_loaded()
+    except Exception:
+        st.error("Cached sources are unavailable. Run: python -m src.apify_ingest")
         st.stop()
-    if not anthropic_key:
-        st.error("🚨 Anthropic API key required.")
-        st.stop()
-
-    client = Groq(api_key=anthropic_key)
     retriever: Retriever = st.session_state["retriever"]
 
     with st.spinner("🔎 Retrieving relevant evidence…"):
         chunks = retriever.query(question)
 
-    if not chunks:
-        st.warning("⚠️ No relevant chunks found. Try a different question or reload sources.")
-        st.stop()
-
-    try:
-        with st.spinner("🧠 Generating reasoning trace…"):
-            trace = generate_trace(client, question, chunks)
-    except RateLimitError:
-        st.error("⚠️ Rate limit reached. Please wait a few seconds and try again.")
-        st.stop()
-    except Exception:
-        st.error("⚠️ Failed to generate the reasoning trace. Check your API usage or logs.")
-        st.stop()
-
-    try:
-        with st.spinner("✅ Auditing each reasoning step…"):
-            trace, score = audit_trace(client, trace, chunks)
-    except RateLimitError:
-        st.error("⚠️ Rate limit reached during audit. Please wait a few seconds and retry.")
-        st.stop()
-    except Exception:
-        st.error("⚠️ Failed to audit the reasoning trace. Check your API usage or logs.")
-        st.stop()
+    with st.spinner("Generating audited answer…"):
+        trace, score = run_pipeline_safe(question, chunks)
 
     # ── layout ───────────────────────────────────────────────────────────────
     col_left, col_right = st.columns([3, 2], gap="large")

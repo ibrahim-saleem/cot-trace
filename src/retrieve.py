@@ -63,5 +63,8 @@ class Retriever:
         q_vec = self.vectorizer.transform([question])
         scores = cosine_similarity(q_vec, self.matrix).flatten()
         top_idx = np.argsort(scores)[::-1][:top_k]
-        # only return chunks with non-zero similarity
-        return [self.chunks[i] for i in top_idx if scores[i] > 0.01]
+        # Prefer relevant chunks, but always return something if index is non-empty.
+        filtered = [self.chunks[i] for i in top_idx if scores[i] > 0.01]
+        if filtered:
+            return filtered
+        return [self.chunks[i] for i in top_idx]
