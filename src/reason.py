@@ -15,6 +15,9 @@ STOPWORDS = {
     "be", "by", "that", "this", "it", "as", "at", "from", "about", "into", "than", "then", "so", "if",
 }
 
+MIN_SENTENCE_SCORE = 0.08
+STRONG_SENTENCE_SCORE = 0.16
+
 
 def _tokenize(text: str) -> set[str]:
     return {t for t in re.findall(r"[a-z0-9]+", text.lower()) if t not in STOPWORDS and len(t) > 2}
@@ -33,13 +36,36 @@ def _overlap_score(a: str, b: str) -> float:
     return len(ta & tb) / max(len(ta), 1)
 
 
+def _build_extractive_answer(top: list[tuple[float, Chunk, str]]) -> tuple[str, list[str], float]:
+    if not top:
+        return (
+            "I do not have enough evidence in the cached sources to answer this reliably.",
+            ["insufficient_evidence"],
+            0.2,
+        )
+
+    strong = [item for item in top if item[0] >= STRONG_SENTENCE_SCORE]
+    chosen = (strong or top)[:2]
+
+    lines = []
+    for _, chunk, sentence in chosen:
+        src = chunk.source or "source"
+        lines.append(f'- "{sentence}" ({src})')
+
+    mean_score = sum(score for score, _, _ in chosen) / max(len(chosen), 1)
+    confidence = min(0.9, max(0.35, mean_score))
+    risk_flags = ["none"] if len(strong) >= 1 else ["low_evidence"]
+    answer = "Based on retrieved evidence:\n" + "\n".join(lines)
+    return answer, risk_flags, confidence
+
+
 def generate_trace(question: str, chunks: list[Chunk]) -> ReasoningTrace:
     ranked: list[tuple[float, Chunk, str]] = []
 
     for c in chunks:
         for s in _sentences(c.text):
             score = _overlap_score(s, question)
-            if score > 0:
+            if score >= MIN_SENTENCE_SCORE:
                 ranked.append((score, c, s))
 
     ranked.sort(key=lambda x: x[0], reverse=True)
@@ -60,14 +86,7 @@ def generate_trace(question: str, chunks: list[Chunk]) -> ReasoningTrace:
             )],
         ))
 
-    if steps:
-        answer = " ".join(s.text for s in steps[:2])
-        confidence = min(0.9, max(0.45, sum(score for score, _, _ in top) / max(len(top), 1)))
-    else:
-        answer = "I could not find enough relevant evidence in the loaded sources."
-        confidence = 0.25
-
-    risk_flags = ["low_evidence"] if len(steps) < 2 else ["none"]
+    answer, risk_flags, confidence = _build_extractive_answer(top)
 
     return ReasoningTrace(
         question=question,
